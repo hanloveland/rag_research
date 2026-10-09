@@ -1,0 +1,12 @@
+build 20000 pts: 0.98s (4 threads)
+[round 0] online      ef=20:0.9744  ef=50:0.9982  ef=100:1.0000
+[delete 30%] tombstone ef=20:0.9914  ef=50:0.9996  ef=100:1.0000
+[delete 30%] fresh     ef=20:0.9820  ef=50:0.9994  ef=100:1.0000
+[churn 1] replace 6000 pts in 1.74s  online ef=20:0.9614  ef=50:0.9984  ef=100:1.0000
+[churn 2] replace 4000 pts in 1.09s  online ef=20:0.9644  ef=50:0.9978  ef=100:0.9998
+[churn 3] replace 4000 pts in 1.15s  online ef=20:0.9624  ef=50:0.9968  ef=100:0.9996
+[churn 4] replace 4000 pts in 1.06s  online ef=20:0.9632  ef=50:0.9980  ef=100:1.0000
+[churn 5] replace 4000 pts in 1.08s  online ef=20:0.9588  ef=50:0.9972  ef=100:0.9992
+[churn 5] fresh                           ef=20:0.9730  ef=50:0.9988  ef=100:0.9998
+[update 20%] in-place 1.04s  online ef=20:0.9600  ef=50:0.9974  ef=100:0.9994
+[update 20%] fresh                ef=20:0.9754  ef=50:0.9988  ef=100:0.9996
