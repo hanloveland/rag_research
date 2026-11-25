@@ -402,6 +402,18 @@ svg .ptr { stroke: var(--muted); stroke-width: 1.2; fill: none; }
 <figcaption>그림 4. hnswlib 인덱스의 자료구조. 그래프의 본체는 0계층 연속 블록과 노드별 상위 계층 블록이고, 나머지는 라벨 변환, 진입점, 방문 표시, 잠금 같은 보조 구조입니다.</figcaption>
 </figure>
 
+<p>그림 4의 구성 요소는 크게 세 묶음입니다. 그래프 본체 두 개(왼쪽 위·중간), 이름 변환과 출발점(오른쪽 위 둘), 검색·갱신의 실행 보조 구조(오른쪽 아래 둘)입니다.</p>
+<div class="tbl"><table>
+<tr><th>구성 요소</th><th>크기</th><th>역할</th><th>언제 쓰이는가</th></tr>
+<tr><td class="m">data_level0_memory_</td><td>N × 레코드 크기, <code>malloc</code> 한 번</td><td>0계층의 모든 노드 레코드(이웃·벡터·label)를 내부 ID 순서로 이어 붙인 연속 블록입니다. 인덱스 메모리의 대부분을 차지합니다. 용량 N은 생성 시 <code>max_elements</code>로 정하고, 늘리려면 <code>resizeIndex</code>가 <code>realloc</code>으로 통째로 옮깁니다.</td><td>모든 거리 계산과 0계층 이웃 확장. 검색 시간의 대부분이 이 블록에 대한 무작위 접근입니다.</td></tr>
+<tr><td class="m">linkLists_[id]</td><td>포인터 N개 + 레벨 ≥ 1인 노드마다 (4 + 4M) × 레벨 수 바이트</td><td>상위 계층의 이웃 목록입니다. 레벨 l인 노드는 l개 계층의 목록을 한 블록에 연달아 두고, 계층 k의 목록은 블록 시작 + (k−1) × (4 + 4M)에 있습니다. 레벨 0인 노드(전체의 약 1 − 1/M)는 포인터가 <code>null</code>입니다. 노드마다 따로 <code>malloc</code>하므로 메모리에 흩어져 있습니다.</td><td>검색과 삽입의 상위 계층 탐욕 하강. 상위 계층 노드는 전체의 1/M 이하라 접근 횟수가 적습니다.</td></tr>
+<tr><td class="m">label_lookup_</td><td><code>unordered_map</code>, 항목 N개</td><td>외부 label → 내부 ID 변환표입니다. 반대 방향 변환은 레코드의 <code>label</code> 필드가 맡습니다. 전역 mutex <code>label_lookup_lock</code> 하나로 보호합니다.</td><td>같은 label로 다시 <code>addPoint</code>할 때(값 갱신 분기), <code>markDelete</code>, <code>getDataByLabel</code>. 검색에는 쓰이지 않습니다.</td></tr>
+<tr><td class="m">enterpoint_node_ · maxlevel_</td><td>정수 두 개</td><td>검색과 삽입이 출발하는 노드의 내부 ID와 현재 최고 계층입니다. 최고 레벨이 더 높은 노드가 삽입될 때만 바뀌며, 그 순간에는 전역 mutex <code>global</code>을 잡습니다. 진입점이 삭제되어도 교체하지 않습니다.</td><td>모든 검색과 삽입의 첫 줄.</td></tr>
+<tr><td class="m">visited (VisitedListPool)</td><td>스레드당 <code>uint16</code> × N, 동시 검색 수만큼</td><td>검색 한 번 동안 이미 거리를 계산한 노드를 표시하는 배열입니다. 아래 설명처럼 태그 값을 올려 재사용하므로 검색마다 지우지 않습니다. 풀에서 빌려 쓰고 반납합니다.</td><td><code>searchLayer</code>와 <code>searchBaseLayerST</code>의 이웃 확장 루프.</td></tr>
+<tr><td class="m">link_list_locks_</td><td><code>std::mutex</code> × N</td><td>노드별 잠금입니다. 삽입·갱신이 어떤 노드의 이웃 목록을 읽거나 고칠 때 그 노드의 잠금만 잡으므로, 삽입끼리는 서로 다른 노드를 병렬로 처리할 수 있습니다. 검색은 이 잠금을 잡지 않습니다.</td><td>삽입의 빔 검색과 역방향 간선 추가, 값 갱신의 재선택. 검색과 갱신의 동시 실행이 안전하지 않은 이유이기도 합니다.</td></tr>
+</table></div>
+<p>이 밖에 그림에 없는 작은 구조로 <code>element_levels_</code>(노드별 레벨, <code>int</code> × N), 삭제 슬롯 집합 <code>deleted_elements</code>(9절), label 단위 striped lock <code>label_op_locks_</code>(65,536개)가 있습니다. 검색 한 번이 실제로 만지는 것은 진입점, <code>linkLists_</code> 몇 개, <code>data_level0_memory_</code>의 레코드 수백 개, 방문 배열뿐입니다.</p>
+
 <h3>방문 표시</h3>
 <p>검색 한 번 동안 같은 노드를 두 번 확장하지 않도록 방문 여부를 기록해야 합니다. 노드마다 불리언 배열을 두고 검색마다 0으로 지우면 N에 비례하는 비용이 듭니다. hnswlib는 <code>uint16</code> 배열과 태그 값 <code>curV</code>를 씁니다. 검색을 시작할 때 <code>curV</code>를 1 올리고, <code>visited[id] == curV</code>이면 이번 검색에서 방문한 노드입니다. 태그가 65,535를 넘어 0으로 돌아올 때만 배열을 지웁니다. 동시에 실행되는 검색 수만큼 배열을 풀에서 빌려 씁니다.</p>
 
